@@ -17,7 +17,8 @@ export interface Campaign {
   unreg: number | null;
   churn: number | null;
   arpu: number | null;
-  roi: number | null;
+  /** Break-even months — from spreadsheet col "Est.ROI (month)" which stores investment/monthly-nett-rate */
+  breakEvenMonths: number | null;
   ltv: number | null;
   roas: number | null;
   notes?: string;
@@ -77,7 +78,7 @@ export function getChannelData(campaigns: Campaign[]) {
 
   return channels.map((channel) => {
     const cc = campaigns.filter((c) => c.channel === channel);
-    const withROI   = cc.filter((c) => c.roi !== null);
+    const withBE    = cc.filter((c) => c.breakEvenMonths !== null);
     const withChurn = cc.filter((c) => c.churn !== null);
     const withDays  = cc.filter((c) => c.days !== null && c.days > 0);
     return {
@@ -87,9 +88,10 @@ export function getChannelData(campaigns: Campaign[]) {
       totalMO: cc.reduce((s, c) => s + c.mo, 0),
       totalGross: cc.reduce((s, c) => s + (c.grossRevenue ?? 0), 0),
       totalNett: cc.reduce((s, c) => s + (c.nettRevenue ?? 0), 0),
-      avgROI:
-        withROI.length
-          ? withROI.reduce((s, c) => s + c.roi!, 0) / withROI.length
+      /** Average break-even months (from spreadsheet's own calculation per campaign) */
+      avgBreakEvenMonths:
+        withBE.length
+          ? withBE.reduce((s, c) => s + c.breakEvenMonths!, 0) / withBE.length
           : null,
       avgChurn:
         withChurn.length

@@ -112,22 +112,20 @@ function ChurnBadge({ churn }: { churn: number | null }) {
 }
 
 /**
- * ROI badge — shows monthly rate when `days` is provided.
- * Monthly rate = roi / (days / 30).  Threshold: ≥25 %/mo = break-even ≤ 4 months.
+ * Break-even badge — shows months to recoup investment.
+ * Source: spreadsheet column "Est.ROI (month)" = investment / (nettRevenue / days × 30).
+ * Threshold: ≤ 4 months = green, 4–8 months = amber, > 8 months = red.
  */
-function ROIBadge({ roi, days }: { roi: number | null; days?: number | null }) {
-  if (roi === null) return <span className="text-slate-300">–</span>;
-  if (days && days > 0) {
-    const moRate = roi / (days / 30);
-    const cls = moRate >= 25 ? "text-emerald-600 font-bold" : moRate >= 12.5 ? "text-amber-600 font-semibold" : "text-slate-500";
-    return (
-      <span className={cls} title={`Raw ROI: ${roi.toFixed(0)}% over ${days}d`}>
-        {moRate.toFixed(1)}<span className="text-[10px] font-normal opacity-70">%/mo</span>
-      </span>
-    );
-  }
-  const cls = roi >= 100 ? "text-emerald-600 font-bold" : roi >= 10 ? "text-amber-600 font-semibold" : "text-slate-500";
-  return <span className={cls}>{roi.toFixed(0)}%</span>;
+function BreakEvenBadge({ months }: { months: number | null }) {
+  if (months === null) return <span className="text-slate-300">–</span>;
+  const cls = months <= 4 ? "text-emerald-600 font-bold"
+    : months <= 8 ? "text-amber-600 font-semibold"
+    : "text-red-500 font-medium";
+  return (
+    <span className={cls}>
+      {months.toFixed(1)}<span className="text-[10px] font-normal opacity-70"> mo</span>
+    </span>
+  );
 }
 
 function ROASBadge({ roas }: { roas: number | null }) {
@@ -146,77 +144,46 @@ const REC_STYLE: Record<RecAction, { border: string; badgeBg: string; badgeText:
   Stop:     { border: "border-l-4 border-red-500",     badgeBg: "bg-red-500",      badgeText: "text-white",  bg: "bg-red-50"      },
 };
 
+const BREAK_EVEN_THRESHOLD = 4; // months — the 4-month rule
+
 /**
- * Break-even months = (investment / monthly nett rate)
- *   where monthly nett rate = totalNett / (avgDays / 30)
- * Threshold: 4 months (120 days).
+ * Computes break-even months from aggregated channel totals.
+ * Used as fallback when the spreadsheet's own per-campaign value isn't available.
  */
 function calcBreakEven(ch: {
   totalCost: number; totalNett: number; avgDays: number | null;
 }): number | null {
   if (ch.totalNett <= 0 || ch.totalCost <= 0) return null;
-  const days = ch.avgDays ?? 30; // fallback: assume 30-day campaign
+  const days = ch.avgDays ?? 30;
   const monthlyNett = ch.totalNett / (days / 30);
   return monthlyNett > 0 ? ch.totalCost / monthlyNett : null;
 }
 
 function getChannelRec(ch: {
   totalCost: number; totalNett: number; totalMO: number;
-  avgChurn: number | null; avgDays: number | null; avgROI: number | null;
+  avgChurn: number | null; avgDays: number | null; avgBreakEvenMonths: number | null;
 }): { action: RecAction; reason: string; breakEvenMonths: number | null } {
   const roas = ch.totalCost > 0 ? ch.totalNett / ch.totalCost : 0;
   const churn = ch.avgChurn;
-  const beMonths = calcBreakEven(ch);
-  const THRESHOLD = 4; // months
+  // Prefer the spreadsheet's own break-even value; fall back to computed
+  const beMonths = ch.avgBreakEvenMonths ?? calcBreakEven(ch);
+  const T = BREAK_EVEN_THRESHOLD;
 
-  // No revenue at all
   if (ch.totalNett === 0 && ch.totalCost > 0) {
-    return {
-      action: "Stop",
-      reason: "Cost incurred but no revenue recorded. Pause and audit targeting.",
-      breakEvenMonths: null,
-    };
+    return { action: "Stop", reason: "Cost incurred but no revenue recorded. Pause and audit.", breakEvenMonths: null };
   }
-
-  // Extreme churn overrides everything
   if (churn !== null && churn > 40) {
-    return {
-      action: "Stop",
-      reason: `Churn ${churn.toFixed(1)}% is critically high — subscriber quality issue. Stop and review.`,
-      breakEvenMonths: beMonths,
-    };
+    return { action: "Stop", reason: `Churn ${churn.toFixed(1)}% critically high — poor subscriber quality. Review targeting.`, breakEvenMonths: beMonths };
   }
-
   if (beMonths !== null) {
-    if (beMonths <= THRESHOLD) {
-      return {
-        action: "Scale",
-        reason: `Break-even in ${beMonths.toFixed(1)} mo (≤ ${THRESHOLD} mo threshold). Strong unit economics — increase budget.`,
-        breakEvenMonths: beMonths,
-      };
-    }
-    if (beMonths <= THRESHOLD * 2) {
-      return {
-        action: "Continue",
-        reason: `Break-even in ${beMonths.toFixed(1)} mo — within LTV window. Optimize to hit ${THRESHOLD}-month target.`,
-        breakEvenMonths: beMonths,
-      };
-    }
-    return {
-      action: "Stop",
-      reason: `Break-even in ${beMonths.toFixed(1)} mo — exceeds ${THRESHOLD * 2} mo acceptable ceiling. Revisit or pause.`,
-      breakEvenMonths: beMonths,
-    };
+    if (beMonths <= T)     return { action: "Scale",    reason: `Break-even ${beMonths.toFixed(1)} mo ≤ ${T} mo — strong unit economics. Increase budget.`, breakEvenMonths: beMonths };
+    if (beMonths <= T * 2) return { action: "Continue", reason: `Break-even ${beMonths.toFixed(1)} mo — within acceptable window. Optimise to reach ${T}-mo target.`, breakEvenMonths: beMonths };
+    return                        { action: "Stop",     reason: `Break-even ${beMonths.toFixed(1)} mo exceeds ${T * 2} mo ceiling. Pause and reassess.`, breakEvenMonths: beMonths };
   }
-
-  // Fallback: use ROAS when no duration data
-  if (roas >= 0.7) {
-    return { action: "Scale",    reason: `ROAS ${(roas*100).toFixed(0)}% — promising return. Increase allocation.`, breakEvenMonths: null };
-  }
-  if (roas >= 0.3) {
-    return { action: "Continue", reason: `ROAS ${(roas*100).toFixed(0)}% — moderate. Monitor and optimise.`,         breakEvenMonths: null };
-  }
-  return { action: "Stop", reason: `ROAS ${(roas*100).toFixed(0)}% with no duration data — insufficient evidence to continue.`, breakEvenMonths: null };
+  // Fallback: no duration data
+  if (roas >= 0.7) return { action: "Scale",    reason: `ROAS ${(roas*100).toFixed(0)}% — promising. Increase allocation.`, breakEvenMonths: null };
+  if (roas >= 0.3) return { action: "Continue", reason: `ROAS ${(roas*100).toFixed(0)}% — moderate. Monitor and optimise.`, breakEvenMonths: null };
+  return                  { action: "Stop",     reason: `ROAS ${(roas*100).toFixed(0)}% — insufficient return. Pause or review.`, breakEvenMonths: null };
 }
 
 /* ─── campaign card (mobile-only) ───────────────────────────────────── */
@@ -269,8 +236,8 @@ function CampaignCard({ c, idx }: { c: Campaign; idx: number }) {
       {open && (
         <div className="grid grid-cols-3 gap-px bg-slate-100 border-t border-slate-100">
           {[
-            { label: "Churn",    value: <ChurnBadge churn={c.churn} /> },
-            { label: "ROI/mo",   value: <ROIBadge roi={c.roi} days={c.days} /> },
+            { label: "Churn",      value: <ChurnBadge churn={c.churn} /> },
+            { label: "Break-even", value: <BreakEvenBadge months={c.breakEvenMonths} /> },
             { label: "Cost/MO",  value: c.mo > 0 ? formatRp(c.costAfterVAT / c.mo) : "–" },
             { label: "Gross Rev",value: c.grossRevenue != null ? formatRp(c.grossRevenue) : "–" },
             { label: "Billrate FP", value: c.billrateFP != null ? `${c.billrateFP}%` : "–" },
@@ -407,10 +374,13 @@ export default function DigiAdsDashboard() {
   const maxNett      = Math.max(...channelData.map((c) => c.totalNett), 1);
   const maxMO        = Math.max(...channelData.map((c) => c.totalMO),   1);
 
-  const bestChannel = sortedByNett[0];
-  const bestROIRow  = [...campaigns]
-    .filter((c): c is Campaign & { roi: number } => c.roi !== null)
-    .sort((a, b) => b.roi - a.roi)[0];
+  const bestChannel  = sortedByNett[0];
+  const fastestBERow = [...campaigns]
+    .filter((c): c is Campaign & { breakEvenMonths: number } => c.breakEvenMonths !== null)
+    .sort((a, b) => a.breakEvenMonths - b.breakEvenMonths)[0];
+  const highestChurnCh = [...channelData]
+    .filter((ch) => ch.avgChurn !== null)
+    .sort((a, b) => b.avgChurn! - a.avgChurn!)[0];
 
   const uniqueCPs = [...new Set(campaigns.map((c) => c.cp))].join(" · ");
 
@@ -876,21 +846,25 @@ export default function DigiAdsDashboard() {
                   </p>
                 </Card>
                 <Card className="p-4 border-l-4 border-blue-500">
-                  <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider mb-1">Highest Initial ROI</p>
-                  <p className="text-sm font-bold text-slate-800">{bestROIRow?.channel ?? "–"}</p>
+                  <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider mb-1">Fastest Break-even</p>
+                  <p className="text-sm font-bold text-slate-800">{fastestBERow?.channel ?? "–"}</p>
                   <p className="text-sm text-blue-600 font-semibold mt-0.5">
-                    {bestROIRow ? `${bestROIRow.roi.toFixed(0)}% · ${bestROIRow.date}` : "–"}
+                    {fastestBERow ? `${fastestBERow.breakEvenMonths.toFixed(1)} mo · ${fastestBERow.date}` : "–"}
                   </p>
                   <p className="text-xs text-slate-500 mt-1.5 leading-relaxed">
-                    {bestROIRow ? `${bestROIRow.service} · ${bestROIRow.mo} MO at ${formatRp(bestROIRow.costAfterVAT)} spend.` : "No ROI data."}
+                    {fastestBERow
+                      ? `${fastestBERow.service} · ${fastestBERow.mo.toLocaleString()} MO at ${formatRp(fastestBERow.costAfterVAT)} spend.`
+                      : "No break-even data yet."}
                   </p>
                 </Card>
                 <Card className="p-4 border-l-4 border-amber-500">
                   <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider mb-1">Watch: High Churn</p>
-                  <p className="text-sm font-bold text-slate-800">SMS Target</p>
-                  <p className="text-sm text-amber-600 font-semibold mt-0.5">38.1% churn · 63 MO</p>
+                  <p className="text-sm font-bold text-slate-800">{highestChurnCh?.channel ?? "–"}</p>
+                  <p className="text-sm text-amber-600 font-semibold mt-0.5">
+                    {highestChurnCh ? `${highestChurnCh.avgChurn!.toFixed(1)}% churn · ${highestChurnCh.totalMO.toLocaleString()} MO` : "–"}
+                  </p>
                   <p className="text-xs text-slate-500 mt-1.5 leading-relaxed">
-                    Highest churn rate. Consider refining targeting or reallocating budget.
+                    Highest churn rate in current filter. Consider refining targeting or reallocating budget.
                   </p>
                 </Card>
               </div>
@@ -921,7 +895,7 @@ export default function DigiAdsDashboard() {
                         <th className="text-right px-3 py-3">Gross Rev</th>
                         <th className="text-right px-3 py-3">Nett Rev</th>
                         <th className="text-right px-3 py-3">Churn</th>
-                        <th className="text-right px-3 py-3">ROI/mo</th>
+                        <th className="text-right px-3 py-3">Break-even</th>
                         <th className="text-right px-3 py-3">ROAS</th>
                       </tr>
                     </thead>
@@ -942,7 +916,7 @@ export default function DigiAdsDashboard() {
                           <td className="px-3 py-2.5 text-right text-slate-600">{c.grossRevenue != null ? formatRp(c.grossRevenue) : "–"}</td>
                           <td className="px-3 py-2.5 text-right font-semibold text-blue-700">{c.nettRevenue != null ? formatRp(c.nettRevenue) : "–"}</td>
                           <td className="px-3 py-2.5 text-right"><ChurnBadge churn={c.churn} /></td>
-                          <td className="px-3 py-2.5 text-right"><ROIBadge roi={c.roi} days={c.days} /></td>
+                          <td className="px-3 py-2.5 text-right"><BreakEvenBadge months={c.breakEvenMonths} /></td>
                           <td className="px-3 py-2.5 text-right"><ROASBadge roas={c.roas} /></td>
                         </tr>
                       ))}

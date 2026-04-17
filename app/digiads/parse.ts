@@ -135,6 +135,13 @@ export function parseSheet(csv: string): {
     // Skip rows with no meaningful cost/mo
     if (costAfterVAT === 0 && mo === 0) continue;
 
+    // Gross Revenue: use c[9] when present, otherwise fall back to FP + DP components
+    const fpRev   = parseMoney(c[7] ?? "") ?? 0;
+    const dpRev   = parseMoney(c[8] ?? "") ?? 0;
+    const grossRevenue =
+      parseMoney(c[9] ?? "") ??
+      (fpRev > 0 || dpRev > 0 ? fpRev + dpRev : null);
+
     campaigns.push({
       id: id++,
       date,
@@ -145,7 +152,7 @@ export function parseSheet(csv: string): {
       costAfterVAT,
       mo,
       pricePerMO: parseMoney(c[6] ?? ""),
-      grossRevenue: parseMoney(c[9] ?? ""),
+      grossRevenue,
       nettRevenue: parseMoney(c[10] ?? ""),
       billrateFP: parseNum(c[11] ?? ""),
       billrateDP: parseNum(c[12] ?? ""),
@@ -154,7 +161,7 @@ export function parseSheet(csv: string): {
       unreg: parseNum(c[15] ?? ""),
       churn: parsePct(c[16] ?? ""),
       arpu: parseMoney(c[17] ?? ""),
-      roi: parseNum(c[18] ?? ""),
+      breakEvenMonths: parseNum(c[18] ?? ""),
       ltv: parseMoney(c[20] ?? ""),
       roas: parseNum(c[21] ?? ""),
       notes: c[19] && c[19].trim() ? c[19].trim() : undefined,
