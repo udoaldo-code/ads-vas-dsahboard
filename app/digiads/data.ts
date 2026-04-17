@@ -77,8 +77,9 @@ export function getChannelData(campaigns: Campaign[]) {
 
   return channels.map((channel) => {
     const cc = campaigns.filter((c) => c.channel === channel);
-    const withROI = cc.filter((c) => c.roi !== null);
+    const withROI   = cc.filter((c) => c.roi !== null);
     const withChurn = cc.filter((c) => c.churn !== null);
+    const withDays  = cc.filter((c) => c.days !== null && c.days > 0);
     return {
       channel,
       count: cc.length,
@@ -93,6 +94,11 @@ export function getChannelData(campaigns: Campaign[]) {
       avgChurn:
         withChurn.length
           ? withChurn.reduce((s, c) => s + c.churn!, 0) / withChurn.length
+          : null,
+      /** Weighted-average campaign duration in days */
+      avgDays:
+        withDays.length
+          ? withDays.reduce((s, c) => s + c.days!, 0) / withDays.length
           : null,
     };
   });

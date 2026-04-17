@@ -111,8 +111,21 @@ function ChurnBadge({ churn }: { churn: number | null }) {
   return <span className={cls}>{churn.toFixed(1)}%</span>;
 }
 
-function ROIBadge({ roi }: { roi: number | null }) {
+/**
+ * ROI badge — shows monthly rate when `days` is provided.
+ * Monthly rate = roi / (days / 30).  Threshold: ≥25 %/mo = break-even ≤ 4 months.
+ */
+function ROIBadge({ roi, days }: { roi: number | null; days?: number | null }) {
   if (roi === null) return <span className="text-slate-300">–</span>;
+  if (days && days > 0) {
+    const moRate = roi / (days / 30);
+    const cls = moRate >= 25 ? "text-emerald-600 font-bold" : moRate >= 12.5 ? "text-amber-600 font-semibold" : "text-slate-500";
+    return (
+      <span className={cls} title={`Raw ROI: ${roi.toFixed(0)}% over ${days}d`}>
+        {moRate.toFixed(1)}<span className="text-[10px] font-normal opacity-70">%/mo</span>
+      </span>
+    );
+  }
   const cls = roi >= 100 ? "text-emerald-600 font-bold" : roi >= 10 ? "text-amber-600 font-semibold" : "text-slate-500";
   return <span className={cls}>{roi.toFixed(0)}%</span>;
 }
@@ -133,34 +146,77 @@ const REC_STYLE: Record<RecAction, { border: string; badgeBg: string; badgeText:
   Stop:     { border: "border-l-4 border-red-500",     badgeBg: "bg-red-500",      badgeText: "text-white",  bg: "bg-red-50"      },
 };
 
+/**
+ * Break-even months = (investment / monthly nett rate)
+ *   where monthly nett rate = totalNett / (avgDays / 30)
+ * Threshold: 4 months (120 days).
+ */
+function calcBreakEven(ch: {
+  totalCost: number; totalNett: number; avgDays: number | null;
+}): number | null {
+  if (ch.totalNett <= 0 || ch.totalCost <= 0) return null;
+  const days = ch.avgDays ?? 30; // fallback: assume 30-day campaign
+  const monthlyNett = ch.totalNett / (days / 30);
+  return monthlyNett > 0 ? ch.totalCost / monthlyNett : null;
+}
+
 function getChannelRec(ch: {
-  totalCost: number; totalNett: number; totalMO: number; avgChurn: number | null;
-}): { action: RecAction; reason: string } {
+  totalCost: number; totalNett: number; totalMO: number;
+  avgChurn: number | null; avgDays: number | null; avgROI: number | null;
+}): { action: RecAction; reason: string; breakEvenMonths: number | null } {
   const roas = ch.totalCost > 0 ? ch.totalNett / ch.totalCost : 0;
   const churn = ch.avgChurn;
-  const roasPct = (roas * 100).toFixed(0);
+  const beMonths = calcBreakEven(ch);
+  const THRESHOLD = 4; // months
 
-  // Scale: healthy return rate OR on-track for LTV break-even with low churn
-  if (roas >= 0.7 && (churn === null || churn < 25)) {
-    return { action: "Scale", reason: `ROAS ${roasPct}% with controlled churn — increase budget allocation.` };
-  }
-  if (roas >= 0.4 && churn !== null && churn < 18) {
-    return { action: "Scale", reason: `ROAS ${roasPct}%, low churn ${churn.toFixed(1)}% — on track for LTV break-even.` };
-  }
-
-  // Stop: very low ROAS or extreme churn
-  if (roas < 0.2 && (churn === null || churn > 30)) {
-    return { action: "Stop", reason: `ROAS only ${roasPct}% with high churn — poor subscriber quality. Review targeting.` };
-  }
+  // No revenue at all
   if (ch.totalNett === 0 && ch.totalCost > 0) {
-    return { action: "Stop", reason: `Cost incurred but no revenue reported. Pause and audit.` };
+    return {
+      action: "Stop",
+      reason: "Cost incurred but no revenue recorded. Pause and audit targeting.",
+      breakEvenMonths: null,
+    };
   }
 
-  // Continue: middle ground
-  if (roas >= 0.3) {
-    return { action: "Continue", reason: `ROAS ${roasPct}% — monitor closely. Optimize creative and targeting.` };
+  // Extreme churn overrides everything
+  if (churn !== null && churn > 40) {
+    return {
+      action: "Stop",
+      reason: `Churn ${churn.toFixed(1)}% is critically high — subscriber quality issue. Stop and review.`,
+      breakEvenMonths: beMonths,
+    };
   }
-  return { action: "Continue", reason: `ROAS ${roasPct}% below target — reassess if trend persists next month.` };
+
+  if (beMonths !== null) {
+    if (beMonths <= THRESHOLD) {
+      return {
+        action: "Scale",
+        reason: `Break-even in ${beMonths.toFixed(1)} mo (≤ ${THRESHOLD} mo threshold). Strong unit economics — increase budget.`,
+        breakEvenMonths: beMonths,
+      };
+    }
+    if (beMonths <= THRESHOLD * 2) {
+      return {
+        action: "Continue",
+        reason: `Break-even in ${beMonths.toFixed(1)} mo — within LTV window. Optimize to hit ${THRESHOLD}-month target.`,
+        breakEvenMonths: beMonths,
+      };
+    }
+    return {
+      action: "Stop",
+      reason: `Break-even in ${beMonths.toFixed(1)} mo — exceeds ${THRESHOLD * 2} mo acceptable ceiling. Revisit or pause.`,
+      breakEvenMonths: beMonths,
+    };
+  }
+
+  // Fallback: use ROAS when no duration data
+  if (roas >= 0.7) {
+    return { action: "Scale",    reason: `ROAS ${(roas*100).toFixed(0)}% — promising return. Increase allocation.`, breakEvenMonths: null };
+  }
+  if (roas >= 0.3) {
+    return { action: "Continue", reason: `ROAS ${(roas*100).toFixed(0)}% — moderate. Monitor and optimise.`,         breakEvenMonths: null };
+  }
+  return { action: "Stop", reason: `ROAS ${(roas*100).toFixed(0)}% with no duration data — insufficient evidence to continue.`, breakEvenMonths: null };
 }
 
 /* ─── campaign card (mobile-only) ───────────────────────────────────── */
@@ -214,7 +270,7 @@ function CampaignCard({ c, idx }: { c: Campaign; idx: number }) {
         <div className="grid grid-cols-3 gap-px bg-slate-100 border-t border-slate-100">
           {[
             { label: "Churn",    value: <ChurnBadge churn={c.churn} /> },
-            { label: "ROI",      value: <ROIBadge roi={c.roi} /> },
+            { label: "ROI/mo",   value: <ROIBadge roi={c.roi} days={c.days} /> },
             { label: "Cost/MO",  value: c.mo > 0 ? formatRp(c.costAfterVAT / c.mo) : "–" },
             { label: "Gross Rev",value: c.grossRevenue != null ? formatRp(c.grossRevenue) : "–" },
             { label: "Billrate FP", value: c.billrateFP != null ? `${c.billrateFP}%` : "–" },
@@ -553,12 +609,17 @@ export default function DigiAdsDashboard() {
               <SectionTitle>Channel Recommendations</SectionTitle>
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
                 {channelData.map((ch) => {
-                  const { action, reason } = getChannelRec(ch);
+                  const { action, reason, breakEvenMonths } = getChannelRec(ch);
                   const style = REC_STYLE[action];
                   const roas = ch.totalCost > 0 ? ch.totalNett / ch.totalCost : 0;
-                  const monthlyROI = ch.totalCost > 0 ? ((ch.totalNett - ch.totalCost) / ch.totalCost) * 100 : 0;
+                  const THRESHOLD = 4;
+                  // progress bar: capped at 2× threshold (8 months) for display
+                  const beBarPct = breakEvenMonths !== null
+                    ? Math.min(100, Math.round((breakEvenMonths / (THRESHOLD * 2)) * 100))
+                    : null;
+                  const thresholdPct = 50; // THRESHOLD / (THRESHOLD*2) = 50%
                   return (
-                    <div key={ch.channel} className={`rounded-2xl shadow-sm border border-slate-100 ${style.border} ${style.bg} p-4 flex flex-col gap-2`}>
+                    <div key={ch.channel} className={`rounded-2xl shadow-sm border border-slate-100 ${style.border} ${style.bg} p-4 flex flex-col gap-2.5`}>
                       {/* header row */}
                       <div className="flex items-center justify-between gap-2">
                         <Badge channel={ch.channel} />
@@ -568,6 +629,7 @@ export default function DigiAdsDashboard() {
                           {action === "Stop" && "■ STOP"}
                         </span>
                       </div>
+
                       {/* metrics row */}
                       <div className="grid grid-cols-3 gap-1 text-center">
                         <div>
@@ -577,18 +639,54 @@ export default function DigiAdsDashboard() {
                           <p className="text-[10px] text-slate-500">ROAS</p>
                         </div>
                         <div>
-                          <p className={`text-sm font-bold ${monthlyROI >= 0 ? "text-emerald-700" : "text-red-600"}`}>
-                            {monthlyROI >= 0 ? "+" : ""}{monthlyROI.toFixed(0)}%
+                          <p className={`text-sm font-bold ${
+                            breakEvenMonths === null ? "text-slate-400"
+                            : breakEvenMonths <= THRESHOLD ? "text-emerald-700"
+                            : breakEvenMonths <= THRESHOLD * 2 ? "text-amber-700"
+                            : "text-red-600"
+                          }`}>
+                            {breakEvenMonths !== null ? `${breakEvenMonths.toFixed(1)} mo` : "–"}
                           </p>
-                          <p className="text-[10px] text-slate-500">ROI</p>
+                          <p className="text-[10px] text-slate-500">Break-even</p>
                         </div>
                         <div>
-                          <p className={`text-sm font-bold ${ch.avgChurn === null ? "text-slate-400" : ch.avgChurn > 25 ? "text-red-600" : ch.avgChurn > 15 ? "text-amber-700" : "text-emerald-700"}`}>
+                          <p className={`text-sm font-bold ${
+                            ch.avgChurn === null ? "text-slate-400"
+                            : ch.avgChurn > 25 ? "text-red-600"
+                            : ch.avgChurn > 15 ? "text-amber-700"
+                            : "text-emerald-700"
+                          }`}>
                             {ch.avgChurn !== null ? `${ch.avgChurn.toFixed(1)}%` : "–"}
                           </p>
                           <p className="text-[10px] text-slate-500">Churn</p>
                         </div>
                       </div>
+
+                      {/* break-even progress bar vs 4-month threshold */}
+                      {beBarPct !== null && (
+                        <div>
+                          <div className="relative w-full bg-slate-200 rounded-full h-1.5">
+                            {/* threshold marker at 50% */}
+                            <div className="absolute top-0 bottom-0 w-px bg-slate-500 z-10" style={{ left: `${thresholdPct}%` }} />
+                            <div
+                              className={`h-1.5 rounded-full transition-all duration-500 ${
+                                action === "Scale" ? "bg-emerald-500"
+                                : action === "Continue" ? "bg-amber-400"
+                                : "bg-red-500"
+                              }`}
+                              style={{ width: `${beBarPct}%` }}
+                            />
+                          </div>
+                          <div className="flex justify-between mt-0.5">
+                            <span className="text-[9px] text-slate-400">0</span>
+                            <span className="text-[9px] text-slate-500 font-medium" style={{ position: "relative", left: `calc(${thresholdPct}% - 24px)` }}>
+                              4 mo
+                            </span>
+                            <span className="text-[9px] text-slate-400">8 mo</span>
+                          </div>
+                        </div>
+                      )}
+
                       {/* reason */}
                       <p className="text-[11px] text-slate-600 leading-relaxed">{reason}</p>
                     </div>
@@ -656,12 +754,12 @@ export default function DigiAdsDashboard() {
                 <Card className="p-4 md:p-5">
                   <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-3">Nett Revenue</p>
                   {sortedByNett.map((ch) => {
-                    const chRoi = ch.totalCost > 0 ? ((ch.totalNett - ch.totalCost) / ch.totalCost) * 100 : null;
+                    const be = calcBreakEven(ch);
                     return (
                       <HBar key={ch.channel} label={ch.channel} value={ch.totalNett}
                         maxValue={maxNett} barClass={getChannelColor(ch.channel).bar}
                         metaLeft={`${ch.totalMO.toLocaleString()} MO · ${ch.count} cmp`}
-                        metaRight={chRoi !== null ? `ROI ${chRoi >= 0 ? "+" : ""}${chRoi.toFixed(0)}%` : undefined}
+                        metaRight={be !== null ? `BE ${be.toFixed(1)} mo` : undefined}
                       />
                     );
                   })}
@@ -823,7 +921,7 @@ export default function DigiAdsDashboard() {
                         <th className="text-right px-3 py-3">Gross Rev</th>
                         <th className="text-right px-3 py-3">Nett Rev</th>
                         <th className="text-right px-3 py-3">Churn</th>
-                        <th className="text-right px-3 py-3">ROI</th>
+                        <th className="text-right px-3 py-3">ROI/mo</th>
                         <th className="text-right px-3 py-3">ROAS</th>
                       </tr>
                     </thead>
@@ -844,7 +942,7 @@ export default function DigiAdsDashboard() {
                           <td className="px-3 py-2.5 text-right text-slate-600">{c.grossRevenue != null ? formatRp(c.grossRevenue) : "–"}</td>
                           <td className="px-3 py-2.5 text-right font-semibold text-blue-700">{c.nettRevenue != null ? formatRp(c.nettRevenue) : "–"}</td>
                           <td className="px-3 py-2.5 text-right"><ChurnBadge churn={c.churn} /></td>
-                          <td className="px-3 py-2.5 text-right"><ROIBadge roi={c.roi} /></td>
+                          <td className="px-3 py-2.5 text-right"><ROIBadge roi={c.roi} days={c.days} /></td>
                           <td className="px-3 py-2.5 text-right"><ROASBadge roas={c.roas} /></td>
                         </tr>
                       ))}
