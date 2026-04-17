@@ -119,8 +119,48 @@ function ROIBadge({ roi }: { roi: number | null }) {
 
 function ROASBadge({ roas }: { roas: number | null }) {
   if (roas === null) return <span className="text-slate-300">–</span>;
-  const cls = roas >= 1 ? "text-emerald-600 font-bold" : roas >= 0.05 ? "text-amber-600 font-semibold" : "text-slate-500";
-  return <span className={cls}>{roas.toFixed(3)}x</span>;
+  const cls = roas >= 1 ? "text-emerald-600 font-bold" : roas >= 0.3 ? "text-amber-600 font-semibold" : "text-slate-500";
+  return <span className={cls}>{(roas * 100).toFixed(1)}%</span>;
+}
+
+/* ─── recommendation logic ───────────────────────────────────────────── */
+
+type RecAction = "Scale" | "Continue" | "Stop";
+
+const REC_STYLE: Record<RecAction, { border: string; badgeBg: string; badgeText: string; bg: string }> = {
+  Scale:    { border: "border-l-4 border-emerald-500", badgeBg: "bg-emerald-500",  badgeText: "text-white",  bg: "bg-emerald-50"  },
+  Continue: { border: "border-l-4 border-amber-400",   badgeBg: "bg-amber-400",    badgeText: "text-white",  bg: "bg-amber-50"    },
+  Stop:     { border: "border-l-4 border-red-500",     badgeBg: "bg-red-500",      badgeText: "text-white",  bg: "bg-red-50"      },
+};
+
+function getChannelRec(ch: {
+  totalCost: number; totalNett: number; totalMO: number; avgChurn: number | null;
+}): { action: RecAction; reason: string } {
+  const roas = ch.totalCost > 0 ? ch.totalNett / ch.totalCost : 0;
+  const churn = ch.avgChurn;
+  const roasPct = (roas * 100).toFixed(0);
+
+  // Scale: healthy return rate OR on-track for LTV break-even with low churn
+  if (roas >= 0.7 && (churn === null || churn < 25)) {
+    return { action: "Scale", reason: `ROAS ${roasPct}% with controlled churn — increase budget allocation.` };
+  }
+  if (roas >= 0.4 && churn !== null && churn < 18) {
+    return { action: "Scale", reason: `ROAS ${roasPct}%, low churn ${churn.toFixed(1)}% — on track for LTV break-even.` };
+  }
+
+  // Stop: very low ROAS or extreme churn
+  if (roas < 0.2 && (churn === null || churn > 30)) {
+    return { action: "Stop", reason: `ROAS only ${roasPct}% with high churn — poor subscriber quality. Review targeting.` };
+  }
+  if (ch.totalNett === 0 && ch.totalCost > 0) {
+    return { action: "Stop", reason: `Cost incurred but no revenue reported. Pause and audit.` };
+  }
+
+  // Continue: middle ground
+  if (roas >= 0.3) {
+    return { action: "Continue", reason: `ROAS ${roasPct}% — monitor closely. Optimize creative and targeting.` };
+  }
+  return { action: "Continue", reason: `ROAS ${roasPct}% below target — reassess if trend persists next month.` };
 }
 
 /* ─── campaign card (mobile-only) ───────────────────────────────────── */
@@ -508,6 +548,55 @@ export default function DigiAdsDashboard() {
 
         {campaigns.length > 0 && (
           <>
+            {/* ── Recommendations ─────────────────────────────────── */}
+            <section>
+              <SectionTitle>Channel Recommendations</SectionTitle>
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                {channelData.map((ch) => {
+                  const { action, reason } = getChannelRec(ch);
+                  const style = REC_STYLE[action];
+                  const roas = ch.totalCost > 0 ? ch.totalNett / ch.totalCost : 0;
+                  const monthlyROI = ch.totalCost > 0 ? ((ch.totalNett - ch.totalCost) / ch.totalCost) * 100 : 0;
+                  return (
+                    <div key={ch.channel} className={`rounded-2xl shadow-sm border border-slate-100 ${style.border} ${style.bg} p-4 flex flex-col gap-2`}>
+                      {/* header row */}
+                      <div className="flex items-center justify-between gap-2">
+                        <Badge channel={ch.channel} />
+                        <span className={`inline-flex items-center px-2.5 py-1 rounded-lg text-xs font-bold tracking-wide ${style.badgeBg} ${style.badgeText}`}>
+                          {action === "Scale" && "▲ SCALE"}
+                          {action === "Continue" && "→ CONTINUE"}
+                          {action === "Stop" && "■ STOP"}
+                        </span>
+                      </div>
+                      {/* metrics row */}
+                      <div className="grid grid-cols-3 gap-1 text-center">
+                        <div>
+                          <p className={`text-sm font-bold ${roas >= 1 ? "text-emerald-700" : roas >= 0.3 ? "text-amber-700" : "text-red-600"}`}>
+                            {(roas * 100).toFixed(0)}%
+                          </p>
+                          <p className="text-[10px] text-slate-500">ROAS</p>
+                        </div>
+                        <div>
+                          <p className={`text-sm font-bold ${monthlyROI >= 0 ? "text-emerald-700" : "text-red-600"}`}>
+                            {monthlyROI >= 0 ? "+" : ""}{monthlyROI.toFixed(0)}%
+                          </p>
+                          <p className="text-[10px] text-slate-500">ROI</p>
+                        </div>
+                        <div>
+                          <p className={`text-sm font-bold ${ch.avgChurn === null ? "text-slate-400" : ch.avgChurn > 25 ? "text-red-600" : ch.avgChurn > 15 ? "text-amber-700" : "text-emerald-700"}`}>
+                            {ch.avgChurn !== null ? `${ch.avgChurn.toFixed(1)}%` : "–"}
+                          </p>
+                          <p className="text-[10px] text-slate-500">Churn</p>
+                        </div>
+                      </div>
+                      {/* reason */}
+                      <p className="text-[11px] text-slate-600 leading-relaxed">{reason}</p>
+                    </div>
+                  );
+                })}
+              </div>
+            </section>
+
             {/* ── KPIs ────────────────────────────────────────────── */}
             <section>
               <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
@@ -566,13 +655,16 @@ export default function DigiAdsDashboard() {
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <Card className="p-4 md:p-5">
                   <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-3">Nett Revenue</p>
-                  {sortedByNett.map((ch) => (
-                    <HBar key={ch.channel} label={ch.channel} value={ch.totalNett}
-                      maxValue={maxNett} barClass={getChannelColor(ch.channel).bar}
-                      metaLeft={`${ch.totalMO.toLocaleString()} MO · ${ch.count} cmp`}
-                      metaRight={ch.avgROI != null ? `ROI ${ch.avgROI.toFixed(0)}%` : undefined}
-                    />
-                  ))}
+                  {sortedByNett.map((ch) => {
+                    const chRoi = ch.totalCost > 0 ? ((ch.totalNett - ch.totalCost) / ch.totalCost) * 100 : null;
+                    return (
+                      <HBar key={ch.channel} label={ch.channel} value={ch.totalNett}
+                        maxValue={maxNett} barClass={getChannelColor(ch.channel).bar}
+                        metaLeft={`${ch.totalMO.toLocaleString()} MO · ${ch.count} cmp`}
+                        metaRight={chRoi !== null ? `ROI ${chRoi >= 0 ? "+" : ""}${chRoi.toFixed(0)}%` : undefined}
+                      />
+                    );
+                  })}
                 </Card>
                 <Card className="p-4 md:p-5">
                   <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-3">Subscribers (MO)</p>
@@ -622,12 +714,12 @@ export default function DigiAdsDashboard() {
                           <th className="text-right px-3 md:px-4 py-3">MO</th>
                           <th className="text-right px-3 md:px-4 py-3 hidden sm:table-cell">Gross Rev</th>
                           <th className="text-right px-3 md:px-4 py-3">Nett Rev</th>
-                          <th className="text-right px-3 md:px-4 py-3">% Return</th>
+                          <th className="text-right px-3 md:px-4 py-3">Monthly ROI</th>
                         </tr>
                       </thead>
                       <tbody>
                         {monthlyData.map((m, i) => {
-                          const ratio = m.totalCost > 0 ? m.totalNett / m.totalCost : 0;
+                          const roi = m.totalCost > 0 ? ((m.totalNett - m.totalCost) / m.totalCost) * 100 : null;
                           return (
                             <tr key={m.month} className={`border-b border-slate-50 hover:bg-slate-50/70 transition-colors ${i % 2 !== 0 ? "bg-slate-50/40" : ""}`}>
                               <td className="px-3 md:px-4 py-3 font-semibold text-slate-800 whitespace-nowrap">{m.month}</td>
@@ -637,9 +729,11 @@ export default function DigiAdsDashboard() {
                               <td className="px-3 md:px-4 py-3 text-right text-slate-600 hidden sm:table-cell">{m.totalGross > 0 ? formatRp(m.totalGross) : "–"}</td>
                               <td className="px-3 md:px-4 py-3 text-right font-semibold text-blue-700">{m.totalNett > 0 ? formatRp(m.totalNett) : "–"}</td>
                               <td className="px-3 md:px-4 py-3 text-right">
-                                <span className={`font-semibold ${ratio >= 0.1 ? "text-emerald-600" : ratio > 0 ? "text-amber-600" : "text-slate-400"}`}>
-                                  {ratio > 0 ? `${(ratio * 100).toFixed(1)}%` : "–"}
-                                </span>
+                                {roi !== null ? (
+                                  <span className={`font-semibold ${roi >= 0 ? "text-emerald-600" : roi >= -50 ? "text-amber-600" : "text-red-500"}`}>
+                                    {roi >= 0 ? "+" : ""}{roi.toFixed(1)}%
+                                  </span>
+                                ) : <span className="text-slate-400">–</span>}
                               </td>
                             </tr>
                           );
@@ -651,7 +745,16 @@ export default function DigiAdsDashboard() {
                           <td className="px-3 md:px-4 py-3 text-right">{kpis.totalMO.toLocaleString()}</td>
                           <td className="px-3 md:px-4 py-3 text-right hidden sm:table-cell">{formatRp(kpis.totalGross)}</td>
                           <td className="px-3 md:px-4 py-3 text-right">{formatRp(kpis.totalNett)}</td>
-                          <td className="px-3 md:px-4 py-3 text-right">{(kpis.overallROAS * 100).toFixed(1)}%</td>
+                          <td className="px-3 md:px-4 py-3 text-right">
+                            {(() => {
+                              const totalROI = kpis.totalInvestment > 0
+                                ? ((kpis.totalNett - kpis.totalInvestment) / kpis.totalInvestment) * 100
+                                : null;
+                              return totalROI !== null
+                                ? `${totalROI >= 0 ? "+" : ""}${totalROI.toFixed(1)}%`
+                                : "–";
+                            })()}
+                          </td>
                         </tr>
                       </tbody>
                     </table>
@@ -756,7 +859,7 @@ export default function DigiAdsDashboard() {
                         <td className="px-3 py-3 text-right">{formatRp(kpis.totalNett)}</td>
                         <td className="px-3 py-3 text-right">–</td>
                         <td className="px-3 py-3 text-right">–</td>
-                        <td className="px-3 py-3 text-right">{kpis.overallROAS.toFixed(3)}x</td>
+                        <td className="px-3 py-3 text-right">{(kpis.overallROAS * 100).toFixed(1)}%</td>
                       </tr>
                     </tfoot>
                   </table>
