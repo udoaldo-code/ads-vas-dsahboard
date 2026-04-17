@@ -7,7 +7,7 @@ import { formatRp, formatRpFull } from "../data";
 
 /* ── constants ───────────────────────────────────────────────────────── */
 const REFRESH_INTERVAL_MS = 60 * 60 * 1000;
-const BREAK_EVEN_THRESHOLD = 4; // months
+const BREAK_EVEN_THRESHOLD = 4;
 
 interface ApiResponse {
   campaigns: CampaignProjection[];
@@ -15,28 +15,46 @@ interface ApiResponse {
   error?: string;
 }
 
-/* ── primitives ──────────────────────────────────────────────────────── */
-
-function Card({ children, className = "" }: { children: React.ReactNode; className?: string }) {
+/* ── shared nav ──────────────────────────────────────────────────────── */
+function PageNav({ active }: { active: "campaign" | "projection" | "forecast" }) {
+  const links = [
+    { href: "/digiads",            label: "Campaign Dashboard", key: "campaign"   },
+    { href: "/digiads/projection", label: "Revenue Projection", key: "projection" },
+    { href: "/digiads/forecast",   label: "Campaign Forecast",  key: "forecast"   },
+  ];
   return (
-    <div className={`bg-white rounded-2xl shadow-sm border border-slate-100 ${className}`}>
-      {children}
+    <div className="border-t border-white/10">
+      <div className="max-w-7xl mx-auto px-3 md:px-8 flex gap-1 py-1.5 overflow-x-auto scrollbar-none">
+        {links.map(({ href, label, key }) => (
+          <Link key={key} href={href}
+            className={`flex items-center whitespace-nowrap px-3 py-2 rounded-lg text-xs font-medium transition-colors shrink-0 ${
+              active === key
+                ? "bg-white/15 text-white"
+                : "text-slate-400 hover:text-white hover:bg-white/10 active:bg-white/15"
+            }`}>
+            {label}
+          </Link>
+        ))}
+      </div>
     </div>
   );
+}
+
+/* ── primitives ──────────────────────────────────────────────────────── */
+function Card({ children, className = "" }: { children: React.ReactNode; className?: string }) {
+  return <div className={`bg-white rounded-2xl shadow-sm border border-slate-100 ${className}`}>{children}</div>;
 }
 
 function SectionTitle({ children }: { children: React.ReactNode }) {
   return (
     <h2 className="text-sm font-semibold text-slate-700 mb-3 md:mb-4 flex items-center gap-2">
-      <span className="w-1 h-4 rounded-full bg-indigo-500 inline-block shrink-0" />
+      <span className="w-1 h-4 rounded-full bg-violet-500 inline-block shrink-0" />
       {children}
     </h2>
   );
 }
 
-function KPICard({ label, value, sub, accent }: {
-  label: string; value: string; sub?: string; accent?: string;
-}) {
+function KPICard({ label, value, sub, accent }: { label: string; value: string; sub?: string; accent?: string }) {
   return (
     <Card className="p-3 md:p-4 flex flex-col gap-1">
       <p className="text-[10px] md:text-[11px] font-semibold text-slate-400 uppercase tracking-wider leading-none">{label}</p>
@@ -44,10 +62,6 @@ function KPICard({ label, value, sub, accent }: {
       {sub && <p className="text-[10px] md:text-[11px] text-slate-400 leading-tight">{sub}</p>}
     </Card>
   );
-}
-
-function Skeleton({ className = "" }: { className?: string }) {
-  return <div className={`animate-pulse bg-slate-200 rounded-lg ${className}`} />;
 }
 
 function Countdown({ nextRefreshAt }: { nextRefreshAt: number }) {
@@ -84,17 +98,16 @@ function ChurnBadge({ churn }: { churn: number | null }) {
 }
 
 /* ── per-campaign card ────────────────────────────────────────────────── */
-
 function CampaignCard({ cp }: { cp: CampaignProjection }) {
   const [expanded, setExpanded] = useState(false);
-  const roasColor = cp.estROAS >= 1 ? "bg-emerald-500" : cp.estROAS >= 0.3 ? "bg-amber-400" : "bg-red-500";
-  const beColor   = cp.roiInMonths !== null
-    ? (cp.roiInMonths <= BREAK_EVEN_THRESHOLD ? "border-emerald-500" : cp.roiInMonths <= BREAK_EVEN_THRESHOLD * 2 ? "border-amber-400" : "border-red-500")
+  const beColor = cp.roiInMonths !== null
+    ? (cp.roiInMonths <= BREAK_EVEN_THRESHOLD ? "border-emerald-500"
+      : cp.roiInMonths <= BREAK_EVEN_THRESHOLD * 2 ? "border-amber-400"
+      : "border-red-500")
     : "border-slate-200";
 
   return (
     <Card className={`overflow-hidden border-l-4 ${beColor}`}>
-      {/* header */}
       <div className="p-4 md:p-5">
         <div className="flex items-start justify-between gap-3 mb-3">
           <div className="min-w-0">
@@ -108,14 +121,12 @@ function CampaignCard({ cp }: { cp: CampaignProjection }) {
             </p>
           </div>
         </div>
-
-        {/* key metrics grid */}
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 md:gap-3">
           {[
-            { label: "MO",          value: cp.mo.toLocaleString("id-ID") },
-            { label: "Campaign Days", value: `${cp.campaignDays}d` },
-            { label: "Net ROAS",    value: <ROASBadge roas={cp.netROAS} /> },
-            { label: "Break-even",  value: <BreakEvenBadge months={cp.roiInMonths} /> },
+            { label: "MO",           value: cp.mo.toLocaleString("id-ID") },
+            { label: "Campaign Days",value: `${cp.campaignDays}d` },
+            { label: "Net ROAS",     value: <ROASBadge roas={cp.netROAS} /> },
+            { label: "Break-even",   value: <BreakEvenBadge months={cp.roiInMonths} /> },
           ].map(({ label, value }) => (
             <div key={label} className="bg-slate-50 rounded-xl px-3 py-2 text-center">
               <p className="text-xs font-bold text-slate-800 leading-snug">{value}</p>
@@ -132,10 +143,10 @@ function CampaignCard({ cp }: { cp: CampaignProjection }) {
           <div className="space-y-1.5">
             {[
               { label: "Gross Revenue",   value: formatRp(cp.grossRevActual) },
-              { label: "Net Revenue",     value: formatRp(cp.netRevActual),    accent: "text-blue-700 font-semibold" },
+              { label: "Net Revenue",     value: formatRp(cp.netRevActual),  accent: "text-blue-700 font-semibold" },
               { label: "Net LTV",         value: formatRp(cp.netLTV) },
               { label: "Net Run Rate/mo", value: formatRp(cp.netRunRate) },
-              { label: "Cost",            value: formatRp(cp.costCampaign),    accent: "text-slate-500" },
+              { label: "Cost",            value: formatRp(cp.costCampaign), accent: "text-slate-500" },
               { label: "Churn",           value: <ChurnBadge churn={cp.churn} /> },
             ].map(({ label, value, accent }) => (
               <div key={label} className="flex justify-between items-center gap-2">
@@ -145,16 +156,16 @@ function CampaignCard({ cp }: { cp: CampaignProjection }) {
             ))}
           </div>
         </div>
-        <div className="p-3 md:p-4 bg-indigo-50/30">
-          <p className="text-[10px] font-semibold text-indigo-400 uppercase tracking-wider mb-2">Projected (end period)</p>
+        <div className="p-3 md:p-4 bg-violet-50/30">
+          <p className="text-[10px] font-semibold text-violet-400 uppercase tracking-wider mb-2">Projected (end period)</p>
           <div className="space-y-1.5">
             {[
-              { label: "Est. Gross Rev",  value: formatRp(cp.estGrossRevTotal) },
-              { label: "Est. Net Rev",    value: formatRp(cp.estNetRevTotal),   accent: "text-indigo-700 font-semibold" },
-              { label: "Est. LTV",        value: formatRp(cp.estLTV) },
-              { label: "Est. Avg Subs",   value: cp.estAvgActiveSubs.toLocaleString() },
+              { label: "Est. Gross Rev",     value: formatRp(cp.estGrossRevTotal) },
+              { label: "Est. Net Rev",       value: formatRp(cp.estNetRevTotal), accent: "text-violet-700 font-semibold" },
+              { label: "Est. LTV",           value: formatRp(cp.estLTV) },
+              { label: "Est. Avg Subs",      value: cp.estAvgActiveSubs.toLocaleString() },
               { label: "Est. Total Charges", value: cp.estTotalCharges.toLocaleString() },
-              { label: "Est. ROAS",       value: <ROASBadge roas={cp.estROAS} /> },
+              { label: "Est. ROAS",          value: <ROASBadge roas={cp.estROAS} /> },
             ].map(({ label, value, accent }) => (
               <div key={label} className="flex justify-between items-center gap-2">
                 <span className="text-[11px] text-slate-500 truncate">{label}</span>
@@ -165,10 +176,10 @@ function CampaignCard({ cp }: { cp: CampaignProjection }) {
         </div>
       </div>
 
-      {/* ARPU forecast toggle */}
+      {/* ARPU forecast */}
       <button
         onClick={() => setExpanded((v) => !v)}
-        className="w-full flex items-center justify-center gap-1.5 py-2.5 text-[11px] text-slate-400 hover:text-indigo-600 hover:bg-indigo-50/40 transition-colors border-t border-slate-100"
+        className="w-full flex items-center justify-center gap-1.5 py-2.5 text-[11px] text-slate-400 hover:text-violet-600 hover:bg-violet-50/40 transition-colors border-t border-slate-100"
         aria-expanded={expanded}
       >
         <svg className={`w-3 h-3 transition-transform ${expanded ? "rotate-180" : ""}`} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5}>
@@ -182,9 +193,9 @@ function CampaignCard({ cp }: { cp: CampaignProjection }) {
           <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider mb-2">ARPU Forecast</p>
           <div className="grid grid-cols-3 gap-2">
             {[
-              { period: "30 days",  arpu: cp.forecastARPU30, churn: cp.churn30 },
-              { period: "60 days",  arpu: cp.forecastARPU60, churn: cp.churn60 },
-              { period: "90 days",  arpu: cp.forecastARPU90, churn: null },
+              { period: "30 days", arpu: cp.forecastARPU30, churn: cp.churn30 },
+              { period: "60 days", arpu: cp.forecastARPU60, churn: cp.churn60 },
+              { period: "90 days", arpu: cp.forecastARPU90, churn: null },
             ].map(({ period, arpu, churn }) => (
               <div key={period} className="bg-white rounded-xl p-2.5 text-center border border-slate-100">
                 <p className="text-xs font-bold text-slate-800">{arpu != null ? formatRp(arpu) : "–"}</p>
@@ -199,10 +210,10 @@ function CampaignCard({ cp }: { cp: CampaignProjection }) {
           </div>
           <div className="mt-3 grid grid-cols-2 gap-2">
             {[
-              { label: "ARPU 30 (with churn)", value: cp.arpu30WithChurn != null ? formatRp(cp.arpu30WithChurn) : "–" },
-              { label: "CR MO (Click→MO)", value: cp.crMO != null ? `${cp.crMO.toFixed(2)}%` : "–" },
-              { label: "CPA", value: cp.cpa != null ? formatRp(cp.cpa) : "–" },
-              { label: "Service Price/Charge", value: cp.servicePricePerCharge > 0 ? formatRp(cp.servicePricePerCharge) : "–" },
+              { label: "ARPU 30 (with churn)",  value: cp.arpu30WithChurn != null ? formatRp(cp.arpu30WithChurn) : "–" },
+              { label: "CR MO",                 value: cp.crMO != null ? `${cp.crMO.toFixed(2)}%` : "–" },
+              { label: "CPA",                   value: cp.cpa != null ? formatRp(cp.cpa) : "–" },
+              { label: "Service Price/Charge",  value: cp.servicePricePerCharge > 0 ? formatRp(cp.servicePricePerCharge) : "–" },
             ].map(({ label, value }) => (
               <div key={label} className="flex justify-between items-center gap-2">
                 <span className="text-[11px] text-slate-500 truncate">{label}</span>
@@ -217,38 +228,40 @@ function CampaignCard({ cp }: { cp: CampaignProjection }) {
 }
 
 /* ── comparison table ─────────────────────────────────────────────────── */
-
 function ComparisonTable({ campaigns }: { campaigns: CampaignProjection[] }) {
   const rows: { label: string; fn: (c: CampaignProjection) => React.ReactNode }[] = [
-    { label: "MO",               fn: (c) => c.mo.toLocaleString("id-ID") },
-    { label: "Campaign Days",    fn: (c) => `${c.campaignDays}d` },
-    { label: "Churn",            fn: (c) => <ChurnBadge churn={c.churn} /> },
-    { label: "Cost",             fn: (c) => formatRp(c.costCampaign) },
-    { label: "CPA",              fn: (c) => c.cpa != null ? formatRp(c.cpa) : "–" },
+    { label: "MO",                fn: (c) => c.mo.toLocaleString("id-ID") },
+    { label: "Campaign Days",     fn: (c) => `${c.campaignDays}d` },
+    { label: "Remaining Days",    fn: (c) => `${c.remainingDays}d` },
+    { label: "Churn",             fn: (c) => <ChurnBadge churn={c.churn} /> },
+    { label: "Cost",              fn: (c) => formatRp(c.costCampaign) },
+    { label: "CPA",               fn: (c) => c.cpa != null ? formatRp(c.cpa) : "–" },
     { label: "Gross Rev (actual)",fn: (c) => formatRp(c.grossRevActual) },
-    { label: "Net Rev (actual)", fn: (c) => formatRp(c.netRevActual) },
-    { label: "Net ROAS",         fn: (c) => <ROASBadge roas={c.netROAS} /> },
-    { label: "Net Run Rate/mo",  fn: (c) => formatRp(c.netRunRate) },
-    { label: "Break-even (mo)",  fn: (c) => <BreakEvenBadge months={c.roiInMonths} /> },
-    { label: "Est. Gross Rev",   fn: (c) => formatRp(c.estGrossRevTotal) },
-    { label: "Est. Net Rev",     fn: (c) => formatRp(c.estNetRevTotal) },
-    { label: "Est. LTV",         fn: (c) => formatRp(c.estLTV) },
-    { label: "Est. ROAS",        fn: (c) => <ROASBadge roas={c.estROAS} /> },
-    { label: "Forecast ARPU 30d",fn: (c) => c.forecastARPU30 != null ? formatRp(c.forecastARPU30) : "–" },
-    { label: "Forecast ARPU 60d",fn: (c) => c.forecastARPU60 != null ? formatRp(c.forecastARPU60) : "–" },
-    { label: "Forecast ARPU 90d",fn: (c) => c.forecastARPU90 != null ? formatRp(c.forecastARPU90) : "–" },
+    { label: "Net Rev (actual)",  fn: (c) => formatRp(c.netRevActual) },
+    { label: "Net ROAS",          fn: (c) => <ROASBadge roas={c.netROAS} /> },
+    { label: "Net Run Rate/mo",   fn: (c) => formatRp(c.netRunRate) },
+    { label: "Break-even",        fn: (c) => <BreakEvenBadge months={c.roiInMonths} /> },
+    { label: "Est. Gross Rev",    fn: (c) => formatRp(c.estGrossRevTotal) },
+    { label: "Est. Net Rev",      fn: (c) => formatRp(c.estNetRevTotal) },
+    { label: "Est. LTV",          fn: (c) => formatRp(c.estLTV) },
+    { label: "Est. ROAS",         fn: (c) => <ROASBadge roas={c.estROAS} /> },
+    { label: "Forecast ARPU 30d", fn: (c) => c.forecastARPU30 != null ? formatRp(c.forecastARPU30) : "–" },
+    { label: "Forecast ARPU 60d", fn: (c) => c.forecastARPU60 != null ? formatRp(c.forecastARPU60) : "–" },
+    { label: "Forecast ARPU 90d", fn: (c) => c.forecastARPU90 != null ? formatRp(c.forecastARPU90) : "–" },
   ];
 
   return (
     <Card className="overflow-hidden">
       <div className="overflow-x-auto scroll-smooth">
-        <table className="w-full text-xs min-w-[480px]">
+        <table className="w-full text-xs min-w-[600px]">
           <thead>
             <tr className="bg-slate-50 border-b border-slate-100">
               <th className="text-left px-3 md:px-4 py-3 text-[10px] text-slate-500 uppercase tracking-wider font-semibold w-36">Metric</th>
               {campaigns.map((c) => (
                 <th key={c.name} className="text-right px-3 md:px-4 py-3 text-[10px] text-slate-500 uppercase tracking-wider font-semibold">
-                  <span className="truncate block max-w-[120px] ml-auto">{c.name.split(" ").slice(0, 3).join(" ")}</span>
+                  <span className="block truncate max-w-[110px] ml-auto" title={c.name}>
+                    {c.name.split(" ").slice(0, 3).join(" ")}
+                  </span>
                 </th>
               ))}
             </tr>
@@ -270,20 +283,19 @@ function ComparisonTable({ campaigns }: { campaigns: CampaignProjection[] }) {
 }
 
 /* ── main page ───────────────────────────────────────────────────────── */
-
-export default function ProjectionPage() {
-  const [data,          setData]          = useState<ApiResponse | null>(null);
-  const [loading,       setLoading]       = useState(true);
-  const [refreshing,    setRefreshing]    = useState(false);
-  const [fetchError,    setFetchError]    = useState<string | null>(null);
-  const [nextRefresh,   setNextRefresh]   = useState(Date.now() + REFRESH_INTERVAL_MS);
+export default function ForecastPage() {
+  const [data,        setData]        = useState<ApiResponse | null>(null);
+  const [loading,     setLoading]     = useState(true);
+  const [refreshing,  setRefreshing]  = useState(false);
+  const [fetchError,  setFetchError]  = useState<string | null>(null);
+  const [nextRefresh, setNextRefresh] = useState(Date.now() + REFRESH_INTERVAL_MS);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const fetchData = useCallback(async (silent = false) => {
     silent ? setRefreshing(true) : setLoading(true);
     setFetchError(null);
     try {
-      const res  = await fetch("/api/digiads/projection", { cache: "no-store" });
+      const res  = await fetch("/api/digiads/forecast", { cache: "no-store" });
       const json: ApiResponse = await res.json();
       if (!res.ok || json.error) throw new Error(json.error ?? `HTTP ${res.status}`);
       setData(json);
@@ -315,7 +327,7 @@ export default function ProjectionPage() {
     return () => { if (timerRef.current) clearInterval(timerRef.current); };
   }, [fetchData, scheduleAutoRefresh]);
 
-  const campaigns = data?.campaigns ?? [];
+  const campaigns    = data?.campaigns ?? [];
   const lastUpdatedStr = data?.fetchedAt
     ? new Date(data.fetchedAt).toLocaleString("id-ID", {
         day: "2-digit", month: "short", year: "numeric",
@@ -323,17 +335,17 @@ export default function ProjectionPage() {
       })
     : null;
 
-  // KPI totals
   const totalCost   = campaigns.reduce((s, c) => s + c.costCampaign,   0);
   const totalMO     = campaigns.reduce((s, c) => s + c.mo,             0);
   const totalNetAct = campaigns.reduce((s, c) => s + c.netRevActual,   0);
   const totalNetEst = campaigns.reduce((s, c) => s + c.estNetRevTotal, 0);
-  const bestBE      = campaigns.filter(c => c.roiInMonths !== null).sort((a, b) => a.roiInMonths! - b.roiInMonths!)[0];
+  const bestBE      = [...campaigns]
+    .filter(c => c.roiInMonths !== null)
+    .sort((a, b) => a.roiInMonths! - b.roiInMonths!)[0];
 
   /* ── HEADER ───────────────────────────────────────────────────────── */
   const header = (
     <header className="bg-[#0f172a] text-white sticky top-0 z-20 shadow-lg">
-      {/* title row */}
       <div className="max-w-7xl mx-auto px-3 md:px-8 py-3 md:py-4 flex items-center justify-between gap-2">
         <div className="flex items-center gap-2.5 min-w-0">
           <div className="w-8 h-8 md:w-9 md:h-9 bg-red-500 rounded-xl flex items-center justify-center font-bold text-white text-sm shrink-0">T</div>
@@ -341,7 +353,7 @@ export default function ProjectionPage() {
             <p className="text-slate-400 text-[9px] md:text-[10px] uppercase tracking-widest font-semibold leading-none hidden sm:block">
               Telkomsel · Digiads 2026
             </p>
-            <h1 className="text-base md:text-lg font-bold text-white leading-tight">Revenue Projection</h1>
+            <h1 className="text-base md:text-lg font-bold text-white leading-tight">Campaign Forecast</h1>
           </div>
         </div>
         <div className="flex items-center gap-2 shrink-0">
@@ -371,24 +383,7 @@ export default function ProjectionPage() {
           </button>
         </div>
       </div>
-
-      {/* page nav */}
-      <div className="border-t border-white/10">
-        <div className="max-w-7xl mx-auto px-3 md:px-8 flex gap-1 py-1.5 overflow-x-auto scrollbar-none">
-          {[
-            { href: "/digiads",            label: "Campaign Dashboard", active: false },
-            { href: "/digiads/projection", label: "Revenue Projection", active: true  },
-            { href: "/digiads/forecast",   label: "Campaign Forecast",  active: false },
-          ].map(({ href, label, active }) => (
-            <Link key={href} href={href}
-              className={`flex items-center whitespace-nowrap px-3 py-2 rounded-lg text-xs font-medium transition-colors shrink-0 ${
-                active ? "bg-white/15 text-white" : "text-slate-400 hover:text-white hover:bg-white/10 active:bg-white/15"
-              }`}>
-              {label}
-            </Link>
-          ))}
-        </div>
-      </div>
+      <PageNav active="forecast" />
     </header>
   );
 
@@ -405,8 +400,8 @@ export default function ProjectionPage() {
               </Card>
             ))}
           </div>
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            {[...Array(3)].map((_, i) => <div key={i} className="animate-pulse bg-slate-200 rounded-2xl h-64" />)}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {[...Array(4)].map((_, i) => <div key={i} className="animate-pulse bg-slate-200 rounded-2xl h-64" />)}
           </div>
         </div>
       </div>
@@ -441,16 +436,8 @@ export default function ProjectionPage() {
         {/* ── KPI summary ─────────────────────────────────────────────── */}
         <section>
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-            <KPICard
-              label="Total Investment"
-              value={formatRp(totalCost)}
-              sub={formatRpFull(totalCost)}
-            />
-            <KPICard
-              label="Total MO"
-              value={totalMO.toLocaleString("id-ID")}
-              sub={`${campaigns.length} campaigns`}
-            />
+            <KPICard label="Total Investment" value={formatRp(totalCost)} sub={formatRpFull(totalCost)} />
+            <KPICard label="Total MO" value={totalMO.toLocaleString("id-ID")} sub={`${campaigns.length} campaigns`} />
             <KPICard
               label="Net Revenue (actual)"
               value={formatRp(totalNetAct)}
@@ -466,14 +453,14 @@ export default function ProjectionPage() {
           </div>
         </section>
 
-        {/* ── best break-even highlight ────────────────────────────────── */}
+        {/* ── fastest break-even highlight ────────────────────────────── */}
         {bestBE && (
           <section>
-            <div className="bg-gradient-to-r from-emerald-700 to-emerald-600 rounded-2xl p-4 md:p-5 text-white flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+            <div className="bg-gradient-to-r from-violet-700 to-violet-600 rounded-2xl p-4 md:p-5 text-white flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
               <div>
-                <p className="text-[10px] font-semibold text-emerald-200 uppercase tracking-wider mb-0.5">Fastest Break-even</p>
+                <p className="text-[10px] font-semibold text-violet-200 uppercase tracking-wider mb-0.5">Fastest Break-even</p>
                 <p className="text-base md:text-lg font-bold">{bestBE.name}</p>
-                <p className="text-sm text-emerald-200 mt-0.5">
+                <p className="text-sm text-violet-200 mt-0.5">
                   Break-even in <span className="font-bold text-white">{bestBE.roiInMonths!.toFixed(2)} months</span> · Est. ROAS {(bestBE.estROAS * 100).toFixed(1)}%
                 </p>
               </div>
@@ -485,7 +472,7 @@ export default function ProjectionPage() {
                 ].map(({ label, value }) => (
                   <div key={label} className="bg-white/10 rounded-xl px-3 py-2">
                     <p className="text-sm font-bold">{value}</p>
-                    <p className="text-[10px] text-emerald-200">{label}</p>
+                    <p className="text-[10px] text-violet-200">{label}</p>
                   </div>
                 ))}
               </div>
@@ -495,8 +482,8 @@ export default function ProjectionPage() {
 
         {/* ── per-campaign cards ───────────────────────────────────────── */}
         <section>
-          <SectionTitle>Campaign Projections</SectionTitle>
-          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+          <SectionTitle>Campaign Projections ({campaigns.length})</SectionTitle>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             {campaigns.map((c) => <CampaignCard key={c.name} cp={c} />)}
           </div>
         </section>
@@ -511,7 +498,7 @@ export default function ProjectionPage() {
 
       <footer className="border-t border-slate-200 mt-6">
         <div className="max-w-7xl mx-auto px-3 md:px-8 py-4 flex flex-col sm:flex-row items-center justify-between gap-1.5 text-[11px] text-slate-400">
-          <span>Source: TELKOMSEL – Digiads 2026 · Revenue Projection Sheet (live)</span>
+          <span>Source: TELKOMSEL – Digiads 2026 · Campaign Forecast Sheet (live)</span>
           <span>{lastUpdatedStr ? `Updated: ${lastUpdatedStr}` : "–"} · IDR</span>
         </div>
       </footer>

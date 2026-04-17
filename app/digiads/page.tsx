@@ -458,15 +458,19 @@ export default function DigiAdsDashboard() {
 
       {/* page nav */}
       <div className="border-t border-white/10">
-        <div className="max-w-7xl mx-auto px-3 md:px-8 flex gap-1 py-1.5">
-          <Link href="/digiads"
-            className="flex items-center gap-1.5 whitespace-nowrap px-3 py-2 rounded-lg text-xs font-medium bg-white/15 text-white">
-            Campaign Dashboard
-          </Link>
-          <Link href="/digiads/projection"
-            className="flex items-center gap-1.5 whitespace-nowrap px-3 py-2 rounded-lg text-xs font-medium text-slate-400 hover:text-white hover:bg-white/10 active:bg-white/15 transition-colors">
-            Revenue Projection
-          </Link>
+        <div className="max-w-7xl mx-auto px-3 md:px-8 flex gap-1 py-1.5 overflow-x-auto scrollbar-none">
+          {[
+            { href: "/digiads",            label: "Campaign Dashboard", active: true  },
+            { href: "/digiads/projection", label: "Revenue Projection", active: false },
+            { href: "/digiads/forecast",   label: "Campaign Forecast",  active: false },
+          ].map(({ href, label, active }) => (
+            <Link key={href} href={href}
+              className={`flex items-center whitespace-nowrap px-3 py-2 rounded-lg text-xs font-medium transition-colors shrink-0 ${
+                active ? "bg-white/15 text-white" : "text-slate-400 hover:text-white hover:bg-white/10 active:bg-white/15"
+              }`}>
+              {label}
+            </Link>
+          ))}
         </div>
       </div>
 

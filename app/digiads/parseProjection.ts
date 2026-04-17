@@ -1,4 +1,4 @@
-/** Parser for the Revenue Projection sheet (gid=1612633253). */
+/** Parser for Revenue Projection sheets (any number of campaigns side-by-side). */
 
 export interface CampaignProjection {
   name: string;
@@ -33,8 +33,8 @@ export interface CampaignProjection {
   estAvgActiveSubs: number;
   estAvgDailyCharges: number;
   estTotalCharges: number;
-  estGrossRevIncremental: number; // future period only
-  estGrossRevTotal: number;       // total = actual + incremental
+  estGrossRevIncremental: number;
+  estGrossRevTotal: number;
   estNetRevTotal: number;
   estLTV: number;
   estROAS: number;
@@ -99,9 +99,10 @@ function parseCsvRow(line: string): string[] {
 /* ── main parser ─────────────────────────────────────────────────────── */
 
 /**
- * Parse the Revenue Projection sheet CSV.
- * The sheet is wide-format: 3 campaigns side-by-side.
- * Column offsets: Campaign 1 → [1, 2/3], Campaign 2 → [5, 6/7], Campaign 3 → [9, 10/11]
+ * Parse a Revenue Projection sheet CSV.
+ * Wide-format: N campaigns side-by-side, each group 4 columns wide:
+ *   [main_value, side_key, side_value, separator]
+ * Campaign groups start at columns 1, 5, 9, 13, …
  */
 export function parseProjectionSheet(csv: string): CampaignProjection[] {
   const lines = csv.split("\n").filter((l) => l.trim());
@@ -109,60 +110,61 @@ export function parseProjectionSheet(csv: string): CampaignProjection[] {
 
   const headerRow = parseCsvRow(lines[0]);
 
-  // Extract campaign names from header: strip trailing " Values"
-  const rawName = (col: number) =>
-    (headerRow[col] ?? "").replace(/\s*Values\s*$/i, "").trim();
-  const names = [rawName(1), rawName(5), rawName(9)];
+  // Detect campaign start columns: 1, 5, 9, 13, ... (step=4)
+  // A column is a campaign if it has a non-empty name that isn't a generic label.
+  const skip = new Set(["Metrics", "Values", ""]);
+  const offsets: number[] = [];
+  for (let col = 1; col < headerRow.length; col += 4) {
+    const cell = (headerRow[col] ?? "").trim();
+    if (cell && !skip.has(cell)) offsets.push(col);
+  }
+  if (offsets.length === 0) return [];
 
-  // Build metric-name → [val1, val2, val3] lookup
-  // val[n] = main column, sideKey[n] = side-table metric, sideVal[n] = side-table value
-  const metricMap: Record<string, [string, string, string]> = {};
-  // Side-table metric-name → value (per campaign index)
-  const sideMap: Record<string, [string, string, string]> = {};
+  const n = offsets.length;
+  const names = offsets.map((col) =>
+    (headerRow[col] ?? "").replace(/\s*Values\s*$/i, "").trim()
+  );
+
+  // Build lookups: metric-name → string[] (one per campaign)
+  const metricMap: Record<string, string[]> = {};
+  const sideMap:   Record<string, string[]> = {};
 
   for (let i = 1; i < lines.length; i++) {
     const c = parseCsvRow(lines[i]);
     const metricName = c[0]?.trim();
     if (!metricName) continue;
 
-    metricMap[metricName] = [c[1] ?? "", c[5] ?? "", c[9] ?? ""];
-
-    // Side-table entries
-    for (const [keyIdx, valIdx] of [[2, 3], [6, 7], [10, 11]] as [number, number][]) {
-      const sk = c[keyIdx]?.trim();
-      const sv = c[valIdx]?.trim() ?? "";
+    if (!metricMap[metricName]) metricMap[metricName] = new Array(n).fill("");
+    offsets.forEach((startCol, idx) => {
+      metricMap[metricName][idx] = c[startCol] ?? "";
+      const sk = c[startCol + 1]?.trim();
+      const sv = c[startCol + 2]?.trim() ?? "";
       if (sk) {
-        const campIdx = keyIdx === 2 ? 0 : keyIdx === 6 ? 1 : 2;
-        if (!sideMap[sk]) sideMap[sk] = ["", "", ""];
-        sideMap[sk][campIdx] = sv;
+        if (!sideMap[sk]) sideMap[sk] = new Array(n).fill("");
+        sideMap[sk][idx] = sv;
       }
-    }
+    });
   }
 
-  const mainVal = (metricName: string, campIdx: 0 | 1 | 2): string =>
-    (metricMap[metricName]?.[campIdx] ?? "");
-  const sideVal = (sideKey: string, campIdx: 0 | 1 | 2): string =>
-    (sideMap[sideKey]?.[campIdx] ?? "");
-
-  // Some metric names appear twice (Est. Gross Revenue has two rows: incremental + total)
-  // We handle this by renaming on second encounter during raw row scan.
-  // Let's re-scan once to pick up duplicate rows explicitly.
+  // Duplicate rows for "Est. Gross Revenue" — first row = incremental, second = total
   const grossRevRows: string[][] = [];
   for (let i = 1; i < lines.length; i++) {
     const c = parseCsvRow(lines[i]);
-    if (c[0]?.trim() === "Est. Gross Revenue (until end period )") {
-      grossRevRows.push([c[1] ?? "", c[5] ?? "", c[9] ?? ""]);
+    if (c[0]?.trim().startsWith("Est. Gross Revenue")) {
+      grossRevRows.push(offsets.map((col) => c[col] ?? ""));
     }
   }
 
+  const mv = (key: string, idx: number) => metricMap[key]?.[idx] ?? "";
+  const sv = (key: string, idx: number) => sideMap[key]?.[idx]  ?? "";
+
   return names.map((name, idx) => {
-    const ci = idx as 0 | 1 | 2;
-    const m = (key: string) => mainVal(key, ci);
-    const s = (key: string) => sideVal(key, ci);
+    const m = (key: string) => mv(key, idx);
+    const s = (key: string) => sv(key, idx);
 
     return {
       name,
-      campaignDays:        parseNum(m("Campaign days (as-till date)"))        ?? 0,
+      campaignDays:        parseNum(m("Campaign days (as-till date)")) ?? parseNum(m("Campaign days (till date)")) ?? 0,
       remainingDays:       parseNum(m("Remaining campaign Days (until Day on last day)")) ?? 0,
       clicks:              parseNum(m("Clicks")),
       crMO:                parsePct(m("CR MO")),
@@ -183,19 +185,18 @@ export function parseProjectionSheet(csv: string): CampaignProjection[] {
       servicePricePerCharge: parseMoney(m("Service Price per Charge"))        ?? 0,
       dailyChargesFP:      parseNum(m("Daily Successfull Charges (First Push)")) ?? 0,
       dailyChargesActual:  parseNum(m("Daily Successfull Charges  (as-till date)")) ?? 0,
-      successfulChargesToDate: parseNum(m("Successfull Charges (as-till date)")) ?? 0,
-      estUnsubPerDayActual: parseNum(m("Est. Unsub per Day (as-till date)"))  ?? 0,
+      successfulChargesToDate: parseNum(m("Successfull Charges (as-of till date )")) ?? parseNum(m("Successfull Charges (as-till date)")) ?? 0,
+      estUnsubPerDayActual: parseNum(m("Est. Unsub per Day (as-of 12 Apr)")) ?? parseNum(m("Est. Unsub per Day (as-till date)")) ?? 0,
       estUnsubPerDayEnd:   parseNum(m("Est. Unsub per Day (until end period )")) ?? 0,
       estAvgActiveSubs:    parseNum(m("Est. Average Active Subs "))           ?? parseNum(m("Est. Average Active Subs")) ?? 0,
       estAvgDailyCharges:  parseNum(m("Est. Average Daily Charges "))         ?? parseNum(m("Est. Average Daily Charges")) ?? 0,
-      estTotalCharges:     parseNum(m("Est. Total Charges (until end period")) ?? 0,
-      estGrossRevIncremental: parseMoney(grossRevRows[0]?.[ci] ?? "")         ?? 0,
-      estGrossRevTotal:    parseMoney(grossRevRows[1]?.[ci] ?? "")             ?? 0,
+      estTotalCharges:     parseNum(m("Est. Total Charges (until end period )")) ?? parseNum(m("Est. Total Charges (until end period")) ?? 0,
+      estGrossRevIncremental: parseMoney(grossRevRows[0]?.[idx] ?? "")        ?? 0,
+      estGrossRevTotal:    parseMoney(grossRevRows[1]?.[idx] ?? "")            ?? 0,
       estNetRevTotal:      parseMoney(m("Est. Net Revenue (until end period )")) ?? 0,
       estLTV:              parseMoney(m("Est. LTV"))                          ?? 0,
       estROAS:             parseNum(m("Est. ROAS"))                           ?? 0,
 
-      // Side-table forecast
       ratio30Campaign:     parseNum(s("30 / Campaign Days")),
       arpu30WithChurn:     parseMoney(s("ARPU 30 with Churn")),
       churn30:             parsePct(s("Churn 30")),
